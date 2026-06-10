@@ -1,7 +1,8 @@
 const http = require('http');
+const os = require('os');
+const { version } = require('./package.json');
 
 const PORT = process.env.PORT || 3000;
-const VERSION = process.env.APP_VERSION || '2.1.0';
 
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
@@ -11,9 +12,9 @@ const server = http.createServer((req, res) => {
   }
 
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end(`Hello from CI/CD pipeline! Version ${VERSION}\nServed by: ${process.env.HOSTNAME || 'local'}\n`);
+  res.end(`Hello from CI/CD pipeline! Version ${version}\nServed by: ${os.hostname()}\n`);
 });
 
 server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT} (version ${VERSION})`);
+  console.log(`Listening on ${PORT}, version ${version}`);
 });
