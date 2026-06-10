@@ -4,14 +4,13 @@ pipeline {
     parameters {
         string(name: 'IMAGE_NAME',      defaultValue: 'nainalaganesh/demo-app', description: 'Docker image name without tag')
         string(name: 'DEPLOYMENT_NAME', defaultValue: 'demo-app',               description: 'Kubernetes Deployment to roll out')
-        string(name: 'NAMESPACE',       defaultValue: 'default',                description: 'Kubernetes namespace to deploy to')
         string(name: 'MANIFEST',        defaultValue: 'k8s/deployment.yaml',    description: 'Path to the Kubernetes manifest')
         string(name: 'KUBECONFIG_CRED', defaultValue: 'minikube-kubeconfig',    description: 'Jenkins credential ID for the target cluster kubeconfig')
         string(name: 'DOCKERHUB_CRED',  defaultValue: 'dockerhub-creds',        description: 'Jenkins credential ID for Docker Hub auth')
     }
 
     options {
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         timestamps()
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
@@ -19,7 +18,6 @@ pipeline {
     environment {
         IMAGE      = "${params.IMAGE_NAME}"
         DEPLOYMENT = "${params.DEPLOYMENT_NAME}"
-        NS         = "${params.NAMESPACE}"
         MANIFEST   = "${params.MANIFEST}"
     }
 
@@ -61,40 +59,71 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Prepare manifest') {
             steps {
-                withCredentials([file(credentialsId: params.KUBECONFIG_CRED, variable: 'KUBE_FILE')]) {
-                    script {
-                        try {
-                            sh '''
-                                export KUBECONFIG=$KUBE_FILE
-                                sed -i "s|$IMAGE:latest|$IMAGE:$BUILD_NUMBER|" $MANIFEST
-                                kubectl apply -n $NS -f $MANIFEST
-                                kubectl rollout status -n $NS deployment/$DEPLOYMENT --timeout=120s
-                            '''
-                        } catch (err) {
-                            echo "Rollout failed. Reverting to previous revision."
-                            sh '''
-                                export KUBECONFIG=$KUBE_FILE
-                                kubectl rollout undo -n $NS deployment/$DEPLOYMENT || true
-                            '''
-                            error("Deploy failed: ${err.message}")
-                        }
-                    }
+                sh 'sed -i "s|$IMAGE:latest|$IMAGE:$BUILD_NUMBER|" $MANIFEST'
+            }
+        }
+
+        stage('Deploy to dev') {
+            steps {
+                script { deployToNamespace('dev') }
+            }
+        }
+
+        stage('Promote to staging?') {
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: "Promote build #${env.BUILD_NUMBER} to staging?", ok: 'Promote'
                 }
+            }
+        }
+
+        stage('Deploy to staging') {
+            steps {
+                script { deployToNamespace('staging') }
+            }
+        }
+
+        stage('Promote to prod?') {
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: "Promote build #${env.BUILD_NUMBER} to prod?", ok: 'Promote'
+                }
+            }
+        }
+
+        stage('Deploy to prod') {
+            steps {
+                script { deployToNamespace('prod') }
             }
         }
     }
 
     post {
-        success {
-            echo "Build #${env.BUILD_NUMBER} deployed ${env.IMAGE}:${env.BUILD_NUMBER} to ${env.NS}."
-        }
-        failure {
-            echo "Build #${env.BUILD_NUMBER} failed. Pods rolled back if a previous revision existed."
-        }
-        always {
-            sh 'docker logout || true'
+        success  { echo "Build #${env.BUILD_NUMBER} reached prod with ${env.IMAGE}:${env.BUILD_NUMBER}." }
+        failure  { echo "Build #${env.BUILD_NUMBER} failed. Any successful deploys remain in place." }
+        aborted  { echo "Build #${env.BUILD_NUMBER} stopped at an approval gate. Already-deployed environments are unchanged." }
+        always   { sh 'docker logout || true' }
+    }
+}
+
+def deployToNamespace(String ns) {
+    withCredentials([file(credentialsId: params.KUBECONFIG_CRED, variable: 'KUBE_FILE')]) {
+        try {
+            sh """
+                export KUBECONFIG=\$KUBE_FILE
+                kubectl create namespace ${ns} --dry-run=client -o yaml | kubectl apply -f -
+                kubectl apply -n ${ns} -f \$MANIFEST
+                kubectl rollout status -n ${ns} deployment/\$DEPLOYMENT --timeout=120s
+            """
+        } catch (err) {
+            echo "Rollout failed in ${ns}. Reverting to previous revision."
+            sh """
+                export KUBECONFIG=\$KUBE_FILE
+                kubectl rollout undo -n ${ns} deployment/\$DEPLOYMENT || true
+            """
+            error("Deploy to ${ns} failed: ${err.message}")
         }
     }
 }
