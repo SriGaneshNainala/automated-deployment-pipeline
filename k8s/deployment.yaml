@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: demo-app
-          image: YOUR_DOCKERHUB_USERNAME/demo-app:latest
+          image: nainalaganesh/demo-app:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
