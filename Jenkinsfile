@@ -10,6 +10,12 @@ pipeline {
         string(name: 'DOCKERHUB_CRED',  defaultValue: 'dockerhub-creds',        description: 'Jenkins credential ID for Docker Hub auth')
     }
 
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
     environment {
         IMAGE      = "${params.IMAGE_NAME}"
         DEPLOYMENT = "${params.DEPLOYMENT_NAME}"
@@ -38,17 +44,19 @@ pipeline {
 
         stage('Push') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: params.DOCKERHUB_CRED,
-                    usernameVariable: 'DH_USER',
-                    passwordVariable: 'DH_PASS'
-                )]) {
-                    sh '''
-                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-                        docker push $IMAGE:$BUILD_NUMBER
-                        docker push $IMAGE:latest
-                        docker logout
-                    '''
+                retry(2) {
+                    withCredentials([usernamePassword(
+                        credentialsId: params.DOCKERHUB_CRED,
+                        usernameVariable: 'DH_USER',
+                        passwordVariable: 'DH_PASS'
+                    )]) {
+                        sh '''
+                            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                            docker push $IMAGE:$BUILD_NUMBER
+                            docker push $IMAGE:latest
+                            docker logout
+                        '''
+                    }
                 }
             }
         }
@@ -56,14 +64,37 @@ pipeline {
         stage('Deploy') {
             steps {
                 withCredentials([file(credentialsId: params.KUBECONFIG_CRED, variable: 'KUBE_FILE')]) {
-                    sh '''
-                        export KUBECONFIG=$KUBE_FILE
-                        sed -i "s|$IMAGE:latest|$IMAGE:$BUILD_NUMBER|" $MANIFEST
-                        kubectl apply -n $NS -f $MANIFEST
-                        kubectl rollout status -n $NS deployment/$DEPLOYMENT --timeout=120s
-                    '''
+                    script {
+                        try {
+                            sh '''
+                                export KUBECONFIG=$KUBE_FILE
+                                sed -i "s|$IMAGE:latest|$IMAGE:$BUILD_NUMBER|" $MANIFEST
+                                kubectl apply -n $NS -f $MANIFEST
+                                kubectl rollout status -n $NS deployment/$DEPLOYMENT --timeout=120s
+                            '''
+                        } catch (err) {
+                            echo "Rollout failed. Reverting to previous revision."
+                            sh '''
+                                export KUBECONFIG=$KUBE_FILE
+                                kubectl rollout undo -n $NS deployment/$DEPLOYMENT || true
+                            '''
+                            error("Deploy failed: ${err.message}")
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Build #${env.BUILD_NUMBER} deployed ${env.IMAGE}:${env.BUILD_NUMBER} to ${env.NS}."
+        }
+        failure {
+            echo "Build #${env.BUILD_NUMBER} failed. Pods rolled back if a previous revision existed."
+        }
+        always {
+            sh 'docker logout || true'
         }
     }
 }
