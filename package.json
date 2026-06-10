@@ -1,0 +1,12 @@
+{
+  "name": "automated-deployment-pipeline",
+  "version": "1.0.0",
+  "description": "CI/CD pipeline that auto-builds and deploys a Node.js app to Kubernetes on every Git push, powered by a Jenkins Groovy pipeline.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node test.js"
+  },
+  "author": "SriGaneshNainala",
+  "license": "MIT"
+}
