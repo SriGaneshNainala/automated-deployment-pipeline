@@ -71,17 +71,17 @@ pipeline {
             }
         }
 
-        stage('Promote to staging?') {
+        stage('Promote to test?') {
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
-                    input message: "Promote build #${env.BUILD_NUMBER} to staging?", ok: 'Promote'
+                    input message: "Promote build #${env.BUILD_NUMBER} to test?", ok: 'Promote'
                 }
             }
         }
 
-        stage('Deploy to staging') {
+        stage('Deploy to test') {
             steps {
-                script { deployToNamespace('staging') }
+                script { deployToNamespace('test') }
             }
         }
 

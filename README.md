@@ -6,7 +6,7 @@
 ![Node.js](https://img.shields.io/badge/Node.js-18-339933?logo=node.js&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-A parameterized Jenkins pipeline that takes a Node.js app from a `git push` to running pods in Kubernetes — across dev, staging, and prod environments with approval gates between them.
+A parameterized Jenkins pipeline that takes a Node.js app from a `git push` to running pods in Kubernetes — across dev, test, and prod environments with approval gates between them.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ flowchart LR
     DH[(Docker Hub)]
     K[Kubernetes Cluster]
     NS1[dev namespace]
-    NS2[staging namespace]
+    NS2[test namespace]
     NS3[prod namespace]
 
     Dev -->|git push| GH
@@ -46,7 +46,7 @@ flowchart LR
 flowchart LR
     Test --> Build --> Push --> Dev[Deploy → dev]
     Dev --> G1{{Approval}}
-    G1 -- proceed --> Stg[Deploy → staging]
+    G1 -- proceed --> Stg[Deploy → test]
     Stg --> G2{{Approval}}
     G2 -- proceed --> Prod[Deploy → prod]
 
@@ -61,7 +61,7 @@ flowchart LR
 - **Automatic build on every commit** — Jenkins polls GitHub every 2 minutes
 - **Five-stage pipeline** — Checkout, Test, Build, Push, Deploy
 - **Immutable image tags** — every build tagged with `BUILD_NUMBER` for traceability and rollback
-- **Multi-environment promotion** — single artifact flows through dev → staging → prod with manual approval gates between each
+- **Multi-environment promotion** — single artifact flows through dev → test → prod with manual approval gates between each
 - **Auto-rollback on failure** — `kubectl rollout undo` reverts the cluster if a deploy fails
 - **Auto-create namespaces** — target namespace is created on first deploy if missing
 - **Retries on transient failures** — push stage retries twice on network errors
@@ -94,8 +94,8 @@ flowchart LR
 | 4 | Push | Authenticate and push both tags to Docker Hub |
 | 5 | Prepare manifest | Patch `deployment.yaml` to reference the new image tag |
 | 6 | Deploy → dev | Apply manifest in `dev` namespace, wait for rollout |
-| 7 | Promote to staging? | Pause for manual approval |
-| 8 | Deploy → staging | Apply manifest in `staging` namespace |
+| 7 | Promote to test? | Pause for manual approval |
+| 8 | Deploy → test | Apply manifest in `test` namespace |
 | 9 | Promote to prod? | Pause for manual approval |
 | 10 | Deploy → prod | Apply manifest in `prod` namespace |
 
